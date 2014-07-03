@@ -4,13 +4,16 @@
     - OpenStack Overview
     - Environment Overview
     - Methodology & Measuring
+        + Ceilometer
+    - On Security & Performance
+        + Our decision making process
 - Chapter 1 - Your System as a Whole
     + Hardware selection
     + Hardware tuning
     + Linux tuning
          (not sure if this naturally fits into other areas?)
     + Performance testing Linux
-	* tools/howto
+	   * tools/howto
 - Chapter 2 - OpenStack Compute (Nova) Tuning
     + Ephemeral Disk Placement
     + KVM Tuning
@@ -34,6 +37,7 @@
 - Chapter 6 - Cinder Tuning
     + LVM
     + Storage backends
+    + Encryption
 - Chapter 7 - Keystone Tuning
     + memcache
     + Tuning LDAP Queries
@@ -43,6 +47,7 @@
 - Chapter 9 - Glance
     + With Registry/Without Registry
     + Scaling
+        * Herd/Murder
     + Maintaing large catalogs
     + APIs?
 - Chapter 10 - Instances (fit under Compute?)

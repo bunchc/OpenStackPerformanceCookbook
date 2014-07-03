@@ -17,6 +17,7 @@
 - Chapter 2 - OpenStack Compute (Nova) Tuning
     + Ephemeral Disk Placement
     + KVM Tuning
+        * Calculating Memory Overheads
     + QEMU Options
     + Libvirt
     + Overcommit

@@ -5,6 +5,7 @@
     - Environment Overview
     - Methodology & Measuring
         + Ceilometer
+        + Rally https://wiki.openstack.org/wiki/Rally
     - On Security & Performance
         + Our decision making process
 - Chapter 1 - Your System as a Whole
@@ -16,8 +17,10 @@
 	   * tools/howto
 - Chapter 2 - OpenStack Compute (Nova) Tuning
     + Ephemeral Disk Placement
+        * iozone
     + KVM Tuning
         * Calculating Memory Overheads
+        * vhost_net
     + QEMU Options
     + Libvirt
     + Overcommit

@@ -1,0 +1,20 @@
+# Ubuntu Install
+Ubuntu 14.04
+
+# Rally Install
+git clone https://git.openstack.org/stackforge/rally
+cd rally
+./install_rally.sh
+
+# Configure Environment
+# create/download existing.json
+# edit credentials to suit
+rally deployment create --filename=existing.json --name=existing
+rally deployment check
+
+# Grab/Edit mytask.json
+# Run Benchmark
+rally -v task start mytask.json
+
+# Create HTML output
+rally task plot2html RALLY_BENCHMARK_UUID  --out output.html

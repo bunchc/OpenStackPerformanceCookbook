@@ -1,0 +1,9 @@
+P{
+    "type": "ExistingCloud",
+    "endpoint": {
+        "auth_url": "http://INSERT_ADDRESS:5000/v2.0/",
+        "username": "ADMIN_USERNAME",
+        "password": "ADMIN_PASSWORD",
+        "tenant_name": "ADMIN_TENANT"
+    }
+}

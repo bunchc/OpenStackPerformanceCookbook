@@ -1,0 +1,498 @@
+# -*- mode: ruby -*-
+
+# vi: set ft=ruby :
+
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.require_version ">= 1.5.0"
+
+$commonscript = <<COMMONSCRIPT
+# Set verbose
+set -v
+
+# Set exit on error
+set -e
+
+# Silly Ubuntu 12.04 doesn't have the
+# --stdin option in the passwd utility
+echo root:vagrant | chpasswd
+
+cat << EOF >> /etc/hosts
+192.168.236.10 chef
+192.168.236.20 controller1
+192.168.236.21 controller2
+192.168.236.30 compute1
+192.168.236.40 cinder1
+EOF
+COMMONSCRIPT
+
+$chefscript = <<CHEFSCRIPT
+# Set verbose
+set -v
+
+# Set exit on error
+set -e
+
+curl https://raw.githubusercontent.com/rcbops/support-tools/master/chef-install/install-chef-server.sh -o /tmp/install-chef-server.sh
+
+chmod +x /tmp/install-chef-server.sh
+
+export CHEF_URL="https://chef:443"
+
+/tmp/install-chef-server.sh
+
+cd /root
+
+git clone https://github.com/rcbops/chef-cookbooks.git
+
+cd chef-cookbooks
+
+git checkout v4.2.2
+git submodule init
+git submodule sync
+git submodule update
+
+knife cookbook upload -a -o cookbooks
+
+knife role from file roles/*rb
+
+cat << EOF >> /tmp/rpcv422.json
+{
+    "name": "rpcv422",
+    "description": "Rackspace Private Cloud v4.2.2",
+    "cookbook_versions": {},
+    "json_class": "Chef::Environment",
+    "chef_type": "environment",
+    "default_attributes": {},
+    "override_attributes": {
+        "nova": {
+            "libvirt": {
+                "virt_type": "qemu",
+                "vncserver_listen": "0.0.0.0"
+            },
+            "network": {
+                "provider": "neutron"
+            }
+        },
+        "neutron": {
+            "ovs": {
+                "provider_networks": [
+                    {
+                        "label": "ph-eth3",
+                        "bridge": "br-eth3"
+                    }
+                ],
+                "network_type": "gre",
+                "network": "neutron",
+                "external_bridge": ""
+            }
+        },
+        "cinder": {
+            "services": {
+                "volume": {
+                    "network": "cinder"
+                }
+            }
+        },
+        "mysql": {
+            "allow_remote_root": true,
+            "root_network_acl": "%"
+        },
+        "osops_networks": {
+            "nova": "192.168.236.0/24",
+            "public": "192.168.236.0/24",
+            "management": "192.168.236.0/24",
+            "neutron": "192.168.240.0/24",
+            "cinder": "192.168.248.0/24"
+        },
+        "vips": {
+            "rabbitmq-queue": "192.168.236.50",
+            "ceilometer-api": "192.168.236.51",
+            "ceilometer-central-agent": "192.168.236.51",
+            "cinder-api": "192.168.236.51",
+            "glance-api": "192.168.236.51",
+            "glance-registry": "192.168.236.51",
+            "heat-api": "192.168.236.51",
+            "heat-api-cfn": "192.168.236.51",
+            "heat-api-cloudwatch": "192.168.236.51",
+            "horizon-dash": "192.168.236.51",
+            "horizon-dash_ssl": "192.168.236.51",
+            "keystone-admin-api": "192.168.236.51",
+            "keystone-internal-api": "192.168.236.51",
+            "keystone-service-api": "192.168.236.51",
+            "nova-api": "192.168.236.51",
+            "nova-api-metadata": "192.168.236.51",
+            "nova-ec2-public": "192.168.236.51",
+            "nova-novnc-proxy": "192.168.236.51",
+            "nova-xvpvnc-proxy": "192.168.236.51",
+            "swift-proxy": "192.168.236.51",
+            "neutron-api": "192.168.236.51",
+            "mysql-db": "192.168.236.52",
+            "config": {
+                "192.168.236.50": {
+                    "vrid": 1,
+                    "network": "public"
+                },
+                "192.168.236.51": {
+                    "vrid": 2,
+                    "network": "public"
+                },
+                "192.168.236.52": {
+                    "vrid": 3,
+                    "network": "public"
+                }
+            }
+        }
+    }
+}
+EOF
+
+knife environment from file /tmp/rpcv422.json
+
+ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa
+
+ssh-keyscan controller1 >> /root/.ssh/known_hosts
+ssh-keyscan 192.168.236.20 >> /root/.ssh/known_hosts
+
+ssh-keyscan controller2 >> /root/.ssh/known_hosts
+ssh-keyscan 192.168.236.21 >> /root/.ssh/known_hosts
+
+ssh-keyscan compute1 >> /root/.ssh/known_hosts
+ssh-keyscan 192.168.236.30 >> /root/.ssh/known_hosts
+
+ssh-keyscan cinder1 >> /root/.ssh/known_hosts
+ssh-keyscan 192.168.236.40 >> /root/.ssh/known_hosts
+
+yum install -y expect
+
+expect<<EOF
+spawn ssh-copy-id controller1
+expect "root@controller1's password:"
+send "vagrant\n"
+expect eof
+EOF
+
+expect<<EOF
+spawn ssh-copy-id controller2
+expect "root@controller2's password:"
+send "vagrant\n"
+expect eof
+EOF
+
+expect<<EOF
+spawn ssh-copy-id compute1
+expect "root@compute1's password:"
+send "vagrant\n"
+expect eof
+EOF
+
+expect<<EOF
+spawn ssh-copy-id cinder1
+expect "root@cinder1's password:"
+send "vagrant\n"
+expect eof
+EOF
+
+#
+# Pre-install cinder1 configuration
+#
+ssh -T cinder1 << EOF
+dd if=/dev/zero of=/mnt/cinder-volumes bs=1 count=0 seek=10G
+
+losetup /dev/loop2 /mnt/cinder-volumes
+
+pvcreate /dev/loop2
+vgcreate cinder-volumes /dev/loop2
+
+sed -i -e '/^exit 0/d' /etc/rc.d/rc.local
+
+cat << EOFRCLOCAL >> /etc/rc.d/rc.local
+losetup /dev/loop2 /mnt/cinder-volumes
+pvscan
+exit 0
+EOFRCLOCAL
+EOF
+
+knife bootstrap controller1 --environment rpcv422
+knife node run_list add controller1 'role[ha-controller1],role[single-network-node]'
+echo "Waiting for Chef Server indexer to catch up before running chef-client"
+sleep 15
+while ! knife ssh "name:controller1" "chef-client"; do echo "chef-client failed, retrying"; sleep 5; done
+
+# Temporary fix for https://github.com/rcbops/chef-cookbooks/issues/941
+ssh controller1 << EOF
+neutron-db-manage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugin.ini stamp havana
+EOF
+
+while ! knife ssh "name:controller1" "chef-client"; do echo "chef-client failed, retrying"; sleep 5; done
+
+knife bootstrap controller2 --environment rpcv422
+knife node run_list add controller2 'role[ha-controller2],role[single-network-node]'
+echo "Waiting for Chef Server indexer to catch up before running chef-client"
+sleep 15
+while ! knife ssh "name:controller2" "chef-client"; do echo "chef-client failed, retrying"; sleep 5; done
+
+while ! knife ssh "name:controller1" "chef-client"; do echo "chef-client failed, retrying"; sleep 5; done
+
+knife bootstrap compute1 --environment rpcv422
+knife node run_list add compute1 'role[single-compute]'
+echo "Waiting for Chef Server indexer to catch up before running chef-client"
+sleep 15
+while ! knife ssh "name:compute1" "chef-client"; do echo "chef-client failed, retrying"; sleep 5; done
+
+knife bootstrap cinder1 --environment rpcv422
+knife node run_list add cinder1 'role[cinder-volume]'
+echo "Waiting for Chef Server indexer to catch up before running chef-client"
+sleep 15
+while ! knife ssh "name:cinder1" "chef-client"; do echo "chef-client failed, retrying"; sleep 5; done
+
+#
+# Post-install controller1 configuration
+#
+ssh -T controller1 << EOF
+ip address delete 192.168.244.20/24 dev eth3
+ip link set br-eth3 up
+ip address add 192.168.244.20/24 dev br-eth3
+
+ovs-vsctl add-port br-eth3 eth3
+
+sed -i -e '/^exit 0/d' /etc/rc.d/rc.local
+
+cat << EOFRCLOCAL >> /etc/rc.d/rc.local
+# This is here to reconfigure eth3
+# if the Vagrant instance is rebooted
+sleep 10
+ip address delete 192.168.244.20/24 dev eth3
+ip link set br-eth3 up
+ip address add 192.168.244.20/24 dev br-eth3
+# Restart Open vSwitch and the Neutron plugin
+# so there are not communication problems after
+# reconfiguring the eth3 interface
+service openvswitch-switch restart
+service neutron-plugin-openvswitch-agent restart
+exit 0
+EOFRCLOCAL
+EOF
+
+#
+# Post-install controller2 configuration
+#
+ssh -T controller2 << EOF
+ip address delete 192.168.244.21/24 dev eth3
+ip link set br-eth3 up
+ip address add 192.168.244.21/24 dev br-eth3
+
+ovs-vsctl add-port br-eth3 eth3
+
+sed -i -e '/^exit 0/d' /etc/rc.d/rc.local
+
+cat << EOFRCLOCAL >> /etc/rc.d/rc.local
+# This is here to reconfigure eth3
+# if the Vagrant instance is rebooted
+sleep 10
+ip address delete 192.168.244.21/24 dev eth3
+ip link set br-eth3 up
+ip address add 192.168.244.21/24 dev br-eth3
+# Restart Open vSwitch and the Neutron plugin
+# so there are not communication problems after
+# reconfiguring the eth3 interface
+service openvswitch-switch restart
+service neutron-plugin-openvswitch-agent restart
+exit 0
+EOFRCLOCAL
+EOF
+
+#
+# Post-install compute1 configuration
+#
+ssh -T compute1 << EOF
+ip address delete 192.168.244.30/24 dev eth3
+ip link set br-eth3 up
+ip address add 192.168.244.30/24 dev br-eth3
+
+ovs-vsctl add-port br-eth3 eth3
+
+sed -i -e '/^exit 0/d' /etc/rc.d/rc.local
+
+cat << EOFRCLOCAL >> /etc/rc.d/rc.local
+# This is here to reconfigure eth3
+# if the Vagrant instance is rebooted
+sleep 10
+ip address delete 192.168.244.30/24 dev eth3
+ip link set br-eth3 up
+ip address add 192.168.244.30/24 dev br-eth3
+# Restart the Neutron plugin so there are not
+# communication problems after reconfiguring
+# the eth3 interface
+service neutron-plugin-openvswitch-agent restart
+exit 0
+EOFRCLOCAL
+EOF
+
+#
+# Turn Chef Server into a router
+#
+echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+
+sysctl -w net.ipv4.ip_forward=1
+
+iptables -A FORWARD -i eth2 -j ACCEPT
+
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+sed -i -e '/^exit 0/d' /etc/rc.d/rc.local
+
+cat << EOFRCLOCAL >> /etc/rc.d/rc.local
+iptables -A FORWARD -i eth2 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+exit 0
+EOFRCLOCAL
+
+echo "All done!"
+CHEFSCRIPT
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+  config.vm.box = "centos-6.5-x86_64"
+  config.vm.box_url = "http://public.thornelabs.net/centos-6.5-x86_64.box"
+
+  config.vm.provider "vmware_fusion" do |v, override|
+    override.vm.box = "centos-6.5-x86_64"
+    override.vm.box_url = "http://public.thornelabs.net/centos-6.5-x86_64.vmware.box"
+  end
+
+  # Turn off shared folders
+  config.vm.synced_folder ".", "/vagrant", id: "vagrant-root", disabled: true
+
+  # Begin controller1
+  config.vm.define "controller1" do |controller1_config|
+    controller1_config.vm.hostname = "controller1"
+
+    controller1_config.vm.provision "shell", inline: $commonscript
+
+    # eth1
+    controller1_config.vm.network "private_network", ip: "192.168.236.20"
+    # eth2
+    controller1_config.vm.network "private_network", ip: "192.168.240.20"
+    # eth3
+    controller1_config.vm.network "private_network", ip: "192.168.244.20"
+    # eth4
+    controller1_config.vm.network "private_network", ip: "192.168.248.20"
+
+    controller1_config.vm.provider "vmware_fusion" do |v|
+        v.vmx["memsize"] = "1536"
+        v.vmx["numvcpus"] = "1"
+    end
+
+    controller1_config.vm.provider "virtualbox" do |v|
+        v.customize ["modifyvm", :id, "--memory", "1536"]
+        v.customize ["modifyvm", :id, "--cpus", "1"]
+        v.customize ["modifyvm", :id, "--nicpromisc4", "allow-all"]
+    end
+  end
+  # End controller1
+
+  # Begin controller2
+  config.vm.define "controller2" do |controller2_config|
+    controller2_config.vm.hostname = "controller2"
+
+    controller2_config.vm.provision "shell", inline: $commonscript
+
+    # eth1
+    controller2_config.vm.network "private_network", ip: "192.168.236.21"
+    # eth2
+    controller2_config.vm.network "private_network", ip: "192.168.240.21"
+    # eth3
+    controller2_config.vm.network "private_network", ip: "192.168.244.21"
+    # eth4
+    controller2_config.vm.network "private_network", ip: "192.168.248.21"
+
+    controller2_config.vm.provider "vmware_fusion" do |v|
+        v.vmx["memsize"] = "2048"
+        v.vmx["numvcpus"] = "1"
+    end
+
+    controller2_config.vm.provider "virtualbox" do |v|
+        v.customize ["modifyvm", :id, "--memory", "2048"]
+        v.customize ["modifyvm", :id, "--cpus", "1"]
+        v.customize ["modifyvm", :id, "--nicpromisc4", "allow-all"]
+    end
+  end
+  # End controller2
+
+  # Begin compute1
+  config.vm.define "compute1" do |compute1_config|
+    compute1_config.vm.hostname = "compute1"
+
+    compute1_config.vm.provision "shell", inline: $commonscript
+
+    # eth1
+    compute1_config.vm.network "private_network", ip: "192.168.236.30"
+    # eth2
+    compute1_config.vm.network "private_network", ip: "192.168.240.30"
+    # eth3
+    compute1_config.vm.network "private_network", ip: "192.168.244.30"
+    # eth4
+    compute1_config.vm.network "private_network", ip: "192.168.248.30"
+
+
+    compute1_config.vm.provider "vmware_fusion" do |v|
+        v.vmx["memsize"] = "2048"
+        v.vmx["numvcpus"] = "2"
+    end
+
+    compute1_config.vm.provider "virtualbox" do |v|
+        v.customize ["modifyvm", :id, "--memory", "2048"]
+        v.customize ["modifyvm", :id, "--cpus", "2"]
+        v.customize ["modifyvm", :id, "--nicpromisc4", "allow-all"]
+    end
+  end
+  # End compute1
+
+  # Begin cinder1
+  config.vm.define "cinder1" do |cinder1_config|
+    cinder1_config.vm.hostname = "cinder1"
+
+    cinder1_config.vm.provision "shell", inline: $commonscript
+
+    # eth1
+    cinder1_config.vm.network "private_network", ip: "192.168.236.40"
+    # eth2
+    cinder1_config.vm.network "private_network", ip: "192.168.248.40"
+
+    cinder1_config.vm.provider "vmware_fusion" do |v|
+        v.vmx["memsize"] = "512"
+        v.vmx["numvcpus"] = "1"
+    end
+
+    cinder1_config.vm.provider "virtualbox" do |v|
+        v.customize ["modifyvm", :id, "--memory", "512"]
+        v.customize ["modifyvm", :id, "--cpus", "1"]
+    end
+  end
+  # End cinder1
+
+  # Begin chef
+  config.vm.define "chef" do |chef_config|
+    chef_config.vm.hostname = "chef"
+
+    chef_config.vm.provision "shell", inline: $commonscript
+    chef_config.vm.provision "shell", inline: $chefscript
+
+    # eth1
+    chef_config.vm.network "private_network", ip: "192.168.236.10"
+    # eth2
+    chef_config.vm.network "private_network", ip: "192.168.244.10"
+
+    chef_config.vm.provider "vmware_fusion" do |v|
+        v.vmx["memsize"] = "1024"
+        v.vmx["numvcpus"] = "1"
+    end
+
+    chef_config.vm.provider "virtualbox" do |v|
+        v.customize ["modifyvm", :id, "--memory", "1024"]
+        v.customize ["modifyvm", :id, "--cpus", "1"]
+    end
+  end
+  # End chef
+end

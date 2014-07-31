@@ -1,15 +1,43 @@
 # Chapter 2 - OpenStack Compute Tuning
 
-In this chapter we will address blah blah some things related to openstack compute. As with all prior chapters, we will first preset a discussion of the options and conclusions, leaving specific test results to the end of the chapter.
+In this chapter we will address blah blah some things related to openstack compute. As with all prior chapters, we will first preset a discussion of the options and conclusions. For detailed results you can either consult the appendix or this book's companion website.
 
 Specifically, in this chapter we will cover the tuning and performance implications of the following:
-- Ephemeril Disk Placement
-- KVM Tuning
-- QEMU Options
-- Libbirt
+- Hypervisor Tuning
 - Overcommit
+- Ephemeril Disk Placement
 - Host Aggregates
 - Performance testing Nova
+
+## Hypervisor Tuning
+
+Hypervisor Tuning is one of those subject areas that like much of this book deserve an entire volume unto themselves. Indeed in the case of VMware vSphere and XEN there are already volumes better suited to such. Thusly, as the authors investigated this area and how to handle it, we decided on the following approach:
+
+- Provide general practices cross hypervisors
+- Provide specifics tunables for Linux-KVM
+
+### General Hypervisor Tuning
+
+As stated before, OpenStack Nova, aka Compute, can be powered by a number of Hypervisors up to and including bare metal. 
+
+### Tuning Linux-KVM
+
+The approach we'll take for tuning Linux-KVM will focus on three areas:
+
+- CPU
+- Memory
+- 
+
+While OpenStack Compute (Nova) has a pluggable backend that allows for a broad selection of hypervisors like VMware's ESXi, Bare Metal, or even Docker, the authors have found that that we encounter KVM in the wild far more often.
+
+
+
+## Overcommit
+
+OpenStack Compute, also known as Nova, allows you to tune the Overcommit ratios for both Memory and CPU. These in turn can have *huge* performance implications. That is, if you set them too high, your performance can and will drop off non-linearly, and if you set them too low, you run the risk of under-utilizing the resources on hand.
+
+### tl;dr Summary:
+The authors recommend 
 
 ## Ephemeril Instance Storage
 
@@ -60,7 +88,6 @@ In all tests I simply ran the following:
 iozone -Rac -f /var/iozonetest -b /tmp/$(hostname).xls 
 iozone -Rac -f /mnt/iozonetest -b /tmp/$(hostname)-mnt.xls   
 
-
 ### Ephemeril Disk Conclusion:
 After extensive testing, where we are deploying PCIe Warp Drives, the following recommendations are to be made:
 
@@ -70,4 +97,3 @@ After extensive testing, where we are deploying PCIe Warp Drives, the following 
 - Where performance is needed in the guest, ensure ephemeral storage uses XFS: ```umount /mnt; mkfs.xfs –f /dev/vdb; mount /mnt```
 - Default is EXT3 – terrible performance in all situations, at a minimum use EXT4
 - If EXT4 is preferred, can use virt_mkfs configuration option in /etc/nova/nova.conf. RPC doesn't support this change.
-
